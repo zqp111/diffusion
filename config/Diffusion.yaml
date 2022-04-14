@@ -1,0 +1,54 @@
+Experiment_name: Diffusion
+
+# feeder
+feeder: feeder.dataset.Mnist
+num_workers: 2
+train_feeder_args:
+# test_feeder_args:
+  root: data
+  split: train
+  image_size: 32
+
+# train_feeder_args:
+test_feeder_args:
+  root: data
+  split: val
+  image_size: 32
+
+# model
+model: model.Diffusion.DenoiseDiffusion
+model_args:
+  eps_model: model.module.unet.UNet
+  eps_args: 
+    image_channels: 1 
+    n_channels: 64
+    ch_mults: [1, 2, 2, 4]
+    is_attn: [False, False, False, True]
+    n_blocks: 2
+  n_steps: 1000
+
+weights: work_dir/Diffusion2022-04-09/save_models/Diffusion-99.pt
+
+
+#optim
+optim: Adam
+weight_decay: 0.0001
+lr: 2e-5
+
+scheduler: None
+scheduler_args: 
+  # milestones: [20, 40, 70]
+  # gamma: 0.1
+
+# training 
+phase: train
+debug: False
+device: [1]
+only_train_epoch: 0
+warm_up_epoch: 0
+batch_size: 256
+epochs: 1000
+nesterov: True
+WeightSaveNum: 10
+
+log_interval: 30
