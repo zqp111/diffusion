@@ -19,67 +19,79 @@ import os
 import torch.nn as nn
 from processor.mylog import MyLog
 import time
-
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
 
 class IO():
     """
     Implementation of
     """
-    def __init__(self, args=None):
+    def __init__(self, args=None, rank=0):
         self.load_args(args)
         self.init_log()
-        self.init_env()
+        self.init_env(rank)
         self.load_model()
         # self.load_weights()
         
 
 
     def load_args(self, args=None):
-        print("Loading", args)
+        self.log_print("Loading", args)
         parser = self.get_parser()
         p = parser.parse_args(args)
         if p.config is not None:
             with open(p.config, 'r') as f:
-                default_args = yaml.load(f)
+                default_args = yaml.load(f, Loader=yaml.FullLoader)
         keys = vars(p).keys()
         for k in default_args.keys():
             assert k in keys, "Unknown configuration {}".format(k)
         parser.set_defaults(**default_args)
 
         self.args = parser.parse_args(args)
-        print('##############load config done#################')
+        self.log_print('##############load config done#################')
 
-    def init_env(self):
+    def init_env(self, rank):
         # 设置GPU卡数
         gpus = [self.args.device] if type(self.args.device) is int else list(self.args.device)
         # os.environ["CUDA_VISIBLE_DEVICES"] = ','.join(list(map(str, gpus)))
-        if type(self.args.device) is int:
-            self.output_device =self.args.device
-        else:
-            self.output_device =self.args.device[0]
-        self.logger.log("The GPU devices:{} are used.".format(self.args.device))
-        self.logger.log("The output devices is GPU:{} ".format(self.output_device))
+        num_gpus = len(gpus)
+        self.world_size = num_gpus
+        if 'MASTER_PORT' not in os.environ:
+            os.environ['MASTER_PORT'] = str(self.args.master_port)
+        if 'MASTER_ADDR' not in os.environ:
+            os.environ['MASTER_ADDR'] = str(self.args.master_addr)
 
-        print('############Init env done!! The GPU devices:{} are used.#################'.format(self.args.device))
+        dist.init_process_group(backend='nccl', 
+                                init_method='env://', 
+                                rank=rank, 
+                                world_size=num_gpus)
+        self.rank = dist.get_rank()
+        print(f'rank = {self.rank } is initialized with cuda {gpus[self.rank]}')
+        self.device = gpus[self.rank] # 指定当前进程所用的卡
+        torch.cuda.set_device(gpus[self.rank])
+        self.log_print('############Init env done!! The GPU devices:{} are used.#################'.format(self.args.device))
+        # exit()
 
     def load_model(self):
         # 加载模型
         Model = import_class(self.args.model)
-        print('load model done ', self.args.model)
+        self.log_print('load model done ', self.args.model)
         self.model = Model(**self.args.model_args).cuda(self.output_device)
         self.load_weights()
 
         if type(self.args.device) is list:
             if len(self.args.device) > 1:
-                self.model = nn.DataParallel(self.model, 
-                                             device_ids=self.args.device, 
-                                             output_device=self.output_device)
+                if dist.is_initialized():
+                    self.model = DDP(self.model, device_ids=[self.device],
+                                    output_device=self.device)
+                else:
+                    raise RuntimeError('Distributed not initialized')
         self.logger.log("The Model is {}".format(self.model))
 
     def load_weights(self):
         if self.args.weights == None:
-            print("No weights file need to load")  
-            self.logger.log("Dont load weights file")
+            if self.rank == 0:
+                self.log_print("Dont load weights file")
         else:
             if ".pkl" in self.args.weights:     
                 with open(self.args.weights) as f:
@@ -89,31 +101,27 @@ class IO():
             else:
                 raise Exception("The weights file cant be load")
             
-            weights = OrderedDict([(k, v.cuda(self.output_device)) for k, v in weights.items()])
+            weights = OrderedDict([(k, v.cuda(self.device)) for k, v in weights.items()])
             # print(weights.keys())
             # exit()
             
             for w in self.args.ignore_weights:
                 if weights.pop(w, None) is not None:
-                    print("success to remove weights:{}".format(w))
-                    self.logger.log("success to remove weights:{}".format(w))
+                    self.log_print("success to remove weights:{}".format(w))
                 else:
                     raise Exception("fail to remove weights:{}".format(w))
             
             try:
                 init_state = self.model.state_dict()
                 diff = list(set(init_state.keys()).difference(set(weights.keys())))
-                print("The weights: {} not in the loadings weights file".format(diff))
-                self.logger.log("The weights: {} not in the loadings weights file".format(diff))
-                print("The cant find weights dont load, only load weights found in the file")
+                self.log_print("The weights: {} not in the loadings weights file".format(diff))
                 init_state.update(weights)
                 self.model.load_state_dict(init_state)
-                self.logger.log("success load weights from {}".format(self.args.weights))
+                self.log_print("success load weights from {}".format(self.args.weights))
             except:
                 state = self.model.state_dict()
                 diff = list(set(state.keys()).difference(set(weights.keys())))
-                print("cant find these weights:", diff)
-                self.logger.log(f"cant find these weights: {diff}")
+                self.log_print(f"cant find these weights: {diff}")
 
     # def freeze_weights(self):
 
@@ -150,7 +158,17 @@ class IO():
         if not os.path.exists(weights_save_path):
             os.mkdir(weights_save_path)
         torch.save(weights, weights_save_path + "/" + self.args.Experiment_name + '-best.pt')
+    
+    def log_print(self, string, *args):
+        if args is not None:
+            string = string.join(map(str,args))
+        if not hasattr(self, 'rank'): # 还没有初始化env时，所有都打印，不进行判断主进程
+            print(string)
+            return
 
+        if self.rank == 0: # 只有主进程打印
+            print(string)
+            self.logger.log(string)
 
 
     @staticmethod
@@ -205,7 +223,10 @@ class IO():
         # hook parameters
         parser.add_argument("--model_config_method", type=int, default=0, help="wether to save results")
         parser.add_argument("--hook", type=bool, default=False, help="wether to use hook")  
-        parser.add_argument("--hook_method", default=None, help="wether to use hook")  
+        parser.add_argument("--hook_method", default=None, help="wether to use hook")
+
+        parser.add_argument("--master_addr", type=str ,default="127.0.0.1", help="The master address")
+        parser.add_argument("--master_port", type=int, default=23456, help="The port of master")
 
 
 
