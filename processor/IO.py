@@ -20,7 +20,7 @@ import torch.nn as nn
 from processor.mylog import MyLog
 import time
 import torch.distributed as dist
-
+from torch.nn.parallel import DistributedDataParallel as DDP
 
 class IO():
     """
@@ -75,15 +75,17 @@ class IO():
     def load_model(self):
         # 加载模型
         Model = import_class(self.args.model)
-        print('load model done ', self.args.model)
+        self.log_print('load model done ', self.args.model)
         self.model = Model(**self.args.model_args).cuda(self.output_device)
         self.load_weights()
 
         if type(self.args.device) is list:
             if len(self.args.device) > 1:
-                self.model = nn.DataParallel(self.model, 
-                                             device_ids=self.args.device, 
-                                             output_device=self.output_device)
+                if dist.is_initialized():
+                    self.model = DDP(self.model, device_ids=[self.device],
+                                    output_device=self.device)
+                else:
+                    raise RuntimeError('Distributed not initialized')
         self.logger.log("The Model is {}".format(self.model))
 
     def load_weights(self):

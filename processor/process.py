@@ -109,7 +109,7 @@ class Process(IO):
         else:
             raise ValueError("NotImplementedError, No match scheduler to use, please check your parameters")
 
-    def adjust_learning_rate(self, epoch):
+    def adjust_learning_rate(self, epoch): # 功能废弃，由scheduler自动调整
         if self.args.optim == 'SGD' or self.args.optim == 'Adam':
             if epoch < self.args.warm_up_epoch:
                 lr = self.args.lr * (epoch + 1) / self.args.warm_up_epoch
@@ -160,7 +160,7 @@ class Process(IO):
                     value.requires_grad = False
                     self.logger.log(key + '-not require grad')
 
-    def save_results(self, results, filename):
+    def save_results(self, results, filename): # 可用于保存logits, preds, labels等
         results_path = os.path.join(self.log_path, "results")
         if not os.path.exists(results_path):
             os.mkdir(results_path)
