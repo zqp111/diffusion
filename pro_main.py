@@ -6,9 +6,11 @@ import argparse
 from processor.base_method import import_class
 import sys
 import os
-# os.environ["CUDA_VISIBLE_DEVICES"] = '1, 2, 3'
-# os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
+import torch.multiprocessing as mp
 
+def main(rank, arg, train):
+    trainer = train(arg, rank=rank)
+    trainer.start()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="AE network")
@@ -24,8 +26,10 @@ if __name__ == '__main__':
     arg = parser.parse_args() #开始读取命令行的数值并保存
     # start
     
-    Processor = processors[sys.argv[1]]  #读取arg的processor属性,取出processors字典中的key代表的元素
-    p = Processor(sys.argv[2:])   #sys.argv[0]指.py程序本身,argv[2:]指从命令行获取的第二个参数
+    Processor = processors[sys.argv[1]] 
+    # p = Processor(sys.argv[2:])   #sys.argv[0]指.py程序本身,argv[2:]指从命令行获取的第二个参数
 
-    print('start')
-    p.start()
+    # print('start')
+    # p.start()
+    arg = sys.argv[2:]
+    mp.spawn(main, nprocs=2, args=(arg, Processor))

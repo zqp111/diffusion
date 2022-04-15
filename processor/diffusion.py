@@ -18,6 +18,8 @@ from processor.process import Process
 from processor.base_method import import_class
 import time
 import numpy as np
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
 
 
 class main(Process):
@@ -25,19 +27,21 @@ class main(Process):
     def load_model(self):
         # 加载模型
         Model = import_class(self.args.model)
-        print(self.args.model)
+        self.log_print(f"import model form: {self.args.model}")
         if self.args.model_config_method == 1:
-            self.model = Model(self.args.model_args).cuda(self.output_device)
+            self.model = Model(self.args.model_args).cuda(self.device)
         else:
-            self.model = Model(**self.args.model_args).cuda(self.output_device)
+            self.model = Model(**self.args.model_args).cuda(self.device)
         self.load_weights() # 在这里加载权重 避免多卡单卡保存的权重名称不一问题
 
         if type(self.args.device) is list:
             if len(self.args.device) > 1:
-                self.model = nn.DataParallel(self.model, 
-                                            device_ids=self.args.device, 
-                                            output_device=self.output_device)
-        self.logger.log("The Model is {}".format(self.model))
+                if dist.is_initialized():
+                    self.model = DDP(self.model, device_ids=[self.device],
+                                    output_device=self.device)
+                else:
+                    raise RuntimeError('Distributed not initialized')
+        self.log_print("The Model is {} had loaded".format(self.model))
 
         # 加载Loss函数
         if len(self.args.device) > 1:
@@ -54,11 +58,14 @@ class main(Process):
         loss_value = []
 
         self.record_time()  # 记录时间
-        process = tqdm(loader, ncols=90)
+        if self.rank == 0:
+            process = tqdm(loader, ncols=90)
+        else:
+            process = loader
 
         for batch_idx, (data, cls) in enumerate(process):
             # load data
-            data, cls = data.cuda(self.output_device), cls.cuda(self.output_device)
+            data, cls = data.cuda(self.device), cls.cuda(self.device)
 
             self.optim.zero_grad()
             # forward
@@ -135,10 +142,13 @@ class main(Process):
         n_sample = self.args.batch_size//8
         x = torch.randn([n_sample, self.args.model_args['eps_args']['image_channels'], 
                         self.args.train_feeder_args['image_size'], self.args.train_feeder_args['image_size']],
-                        device=self.output_device)
+                        device=self.device)
 
         # Remove noise for $T$ steps
-        process = tqdm(range(self.args.model_args['n_steps']), ncols=90)
+        if self.rank == 0:
+            process = tqdm(range(self.args.model_args['n_steps']), ncols=90)
+        else:
+            process = range(self.args.model_args['n_steps'])
         for t_ in process:
             # $t$
             t = self.args.model_args['n_steps'] - t_ - 1

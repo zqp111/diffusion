@@ -7,18 +7,19 @@ import numpy as np
 import time
 import os
 import pickle
-
+import shutil
 from torch.utils.tensorboard import SummaryWriter
 
 
 class Process(IO):
-    def __init__(self, args=None):
+    def __init__(self, args=None, rank=0):
         self.load_args(args)
         self.init_log()
-        self.init_env()
+        self.init_env(rank)
         self.load_model()
         # self.load_weights()
         self.save_args()
+        self.cp_model()
         self.load_data()
         self.load_optim()
 
@@ -26,8 +27,8 @@ class Process(IO):
             self.register_hook()
 
 
-    def init_env(self):
-        super().init_env()
+    def init_env(self, rank):
+        super().init_env(rank)
         self.result = dict()
         self.iter_info = dict()
         self.epoch_info = dict()
@@ -38,26 +39,45 @@ class Process(IO):
         with open('{}/config.yaml'.format(self.log_path), 'w') as f:
             yaml.dump(arg_dict, f)
 
+    def cp_model(self):
+        if os.path.exists(os.path.join(self.log_path, 'model')):
+            shutil.rmtree(os.path.join(self.log_path, 'model'))
+        shutil.copytree('model', os.path.join(self.log_path, 'model'))
+
     def load_data(self):
         Feeder = import_class(self.args.feeder)
         # if "debug" not in self.args.test_feeder_args:
         #     self.args.test_feeder_args["debug"] = self.args.debug
         self.data_loader = {}
+        
         if self.args.phase == "train":
+            train_set = Feeder(**self.args.train_feeder_args)
+            train_sample = torch.utils.data.distributed.DistributedSampler(train_set,
+                num_replicas=self.world_size,
+                rank=self.rank,
+                shuffle=True)
             self.data_loader["train"] = torch.utils.data.DataLoader(
-                dataset=Feeder(**self.args.train_feeder_args),
+                dataset=train_set,
+                sampler=train_sample,
                 batch_size=self.args.batch_size,
-                shuffle=True,
+                shuffle=False,
                 num_workers=self.args.num_workers,
                 drop_last=True
             )
+        test_set = Feeder(**self.args.test_feeder_args)
+        test_sample = torch.utils.data.distributed.DistributedSampler(test_set,
+            num_replicas=self.world_size,
+                rank=self.rank,
+                shuffle=False)
         self.data_loader["test"] = torch.utils.data.DataLoader(
-                dataset=Feeder(**self.args.test_feeder_args),
+                dataset=test_set,
+                sampler=test_sample,
                 batch_size=self.args.batch_size,
-                shuffle=True,
+                shuffle=False,
                 num_workers=self.args.num_workers,
                 drop_last=True
             )
+        self.log_print(f"Successfully load dataset: {self.args.feeder}")
 
     def load_optim(self):
         if self.args.optim == "Adam":

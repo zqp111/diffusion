@@ -43,10 +43,10 @@ scheduler_args:
 # training 
 phase: train
 debug: False
-device: [1]
+device: [0,1]
 only_train_epoch: 0
 warm_up_epoch: 0
-batch_size: 256
+batch_size: 2
 epochs: 1000
 nesterov: True
 WeightSaveNum: 10
