@@ -1,4 +1,4 @@
-Experiment_name: Diffusion
+Experiment_name: Diffusion_test
 
 # feeder
 feeder: feeder.dataset.Mnist
@@ -29,6 +29,7 @@ model_args:
 
 weights: work_dir/Diffusion2022-04-09/save_models/Diffusion-99.pt
 
+n_samples: 16
 
 #optim
 optim: Adam
@@ -41,7 +42,7 @@ scheduler_args:
   # gamma: 0.1
 
 # training 
-phase: train
+phase: test
 debug: False
 device: [0,1]
 only_train_epoch: 0

@@ -136,7 +136,7 @@ class main(Process):
 
         # $x_T \sim p(x_T) = \mathcal{N}(x_T; \mathbf{0}, \mathbf{I})$
         # TODO: n_sample
-        n_sample = self.args.batch_size//8
+        n_sample = self.args.n_samples
         x = torch.randn([n_sample, self.args.model_args['eps_args']['image_channels'], 
                         self.args.train_feeder_args['image_size'], self.args.train_feeder_args['image_size']],
                         device=self.device)
@@ -150,12 +150,10 @@ class main(Process):
             # $t$
             t = self.args.model_args['n_steps'] - t_ - 1
             # Sample from $\textcolor{cyan}{p_\theta}(x_{t-1}|x_t)$
-            if len(self.args.device) > 1:
-                x = self.model.module.p_sample(x, x.new_full((n_sample,), t, dtype=torch.long))
-            else:
-                x = self.model.p_sample(x, x.new_full((n_sample,), t, dtype=torch.long))
+            x = self.model.module.p_sample(x, x.new_full((n_sample,), t, dtype=torch.long))
 
         if self.rank == 0:
+            x = torch.clamp(x, 0, 1)
             grid = torchvision.utils.make_grid(x, nrow=8)
             self.writer.add_image('recon_val', grid, self.meta_info['epoch'])
             self.writer.flush()

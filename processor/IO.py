@@ -56,6 +56,7 @@ class IO():
         # os.environ["CUDA_VISIBLE_DEVICES"] = ','.join(list(map(str, gpus)))
         num_gpus = len(gpus)
         self.world_size = num_gpus
+        print("num_gpus: ", num_gpus)
         if 'MASTER_PORT' not in os.environ:
             os.environ['MASTER_PORT'] = str(self.args.master_port)
         if 'MASTER_ADDR' not in os.environ:
@@ -228,6 +229,7 @@ class IO():
         parser.add_argument("--master_addr", type=str ,default="127.0.0.1", help="The master address")
         parser.add_argument("--master_port", type=int, default=23456, help="The port of master")
 
+        parser.add_argument("--n_samples", type=int, default=1, help="the number of sample")
 
 
         return parser
