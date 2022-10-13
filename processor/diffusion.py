@@ -88,18 +88,19 @@ class main(Process):
 
             # record
             self.iter_info['loss'] = loss.data.item()
-            self.writer.add_scalar('train_iter_loss', self.iter_info['loss'], self.meta_info['iter'])
-            self.writer.flush()
+            if self.rank == 0:
+                self.writer.add_scalar('train_iter_loss', self.iter_info['loss'], self.meta_info['iter'])
+                self.writer.flush()
 
             self.iter_info['lr'] = self.optim.param_groups[0]['lr']
             
-
-            loss_value.append(self.iter_info['loss'])
-            self.show_iter_info()
+            if self.rank == 0:
+                loss_value.append(self.iter_info['loss'])
+                self.show_iter_info()
 
             self.meta_info['iter'] += 1
 
-            if batch_idx % self.args.log_interval == 0:
+            if batch_idx % self.args.log_interval == 0 and self.rank == 0:
                 process.set_description(
                     '\tLoss: {:.4f}  lr:{:.6f}'.format(self.iter_info['loss'], self.iter_info['lr']))
 
@@ -113,21 +114,17 @@ class main(Process):
 
         self.epoch_info['mean_loss'] = np.mean(loss_value)
         self.epoch_info['lr'] = self.optim.param_groups[0]['lr']
-        self.writer.add_scalar('train_epoch_loss', self.epoch_info['mean_loss'], self.meta_info['epoch'])
-        # self.writer.flush()
-        self.show_epoch_info()
-
-
-        self.writer.add_scalar('lr', self.epoch_info['lr'], self.meta_info['epoch'])
-        self.writer.flush()
+        if self.rank == 0:
+            self.writer.add_scalar('train_epoch_loss', self.epoch_info['mean_loss'], self.meta_info['epoch'])
+            # self.writer.flush()
+            self.show_epoch_info()
+            self.writer.add_scalar('lr', self.epoch_info['lr'], self.meta_info['epoch'])
+            self.writer.flush()
 
         epoch_time = self.split_time()
-        self.logger.log("The train epoch {} time:{}, loss: {}".format(
+        self.log_print("The train epoch {} time:{}, loss: {}".format(
             epoch, epoch_time, self.epoch_info['mean_loss']))
 
-        print("The train epoch {} time:{}, loss: {}".format(
-            epoch, epoch_time, self.epoch_info['mean_loss']))
-            
         if self.args.scheduler != "None":
             self.scheduler.step()
 
@@ -139,7 +136,7 @@ class main(Process):
 
         # $x_T \sim p(x_T) = \mathcal{N}(x_T; \mathbf{0}, \mathbf{I})$
         # TODO: n_sample
-        n_sample = self.args.batch_size//8
+        n_sample = self.args.n_samples
         x = torch.randn([n_sample, self.args.model_args['eps_args']['image_channels'], 
                         self.args.train_feeder_args['image_size'], self.args.train_feeder_args['image_size']],
                         device=self.device)
@@ -153,15 +150,13 @@ class main(Process):
             # $t$
             t = self.args.model_args['n_steps'] - t_ - 1
             # Sample from $\textcolor{cyan}{p_\theta}(x_{t-1}|x_t)$
-            if len(self.args.device) > 1:
-                x = self.model.module.p_sample(x, x.new_full((n_sample,), t, dtype=torch.long))
-            else:
-                x = self.model.p_sample(x, x.new_full((n_sample,), t, dtype=torch.long))
+            x = self.model.module.p_sample(x, x.new_full((n_sample,), t, dtype=torch.long))
 
-
-        grid = torchvision.utils.make_grid(x, nrow=8)
-        self.writer.add_image('recon_val', grid, self.meta_info['epoch'])
-        self.writer.flush()
+        if self.rank == 0:
+            x = torch.clamp(x, 0, 1)
+            grid = torchvision.utils.make_grid(x, nrow=8)
+            self.writer.add_image('recon_val', grid, self.meta_info['epoch'])
+            self.writer.flush()
 
 
         epoch_time = self.split_time()

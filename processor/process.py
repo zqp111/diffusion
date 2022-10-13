@@ -16,6 +16,7 @@ class Process(IO):
         self.load_args(args)
         self.init_log()
         self.init_env(rank)
+        self.init_tb()
         self.load_model()
         # self.load_weights()
         self.save_args()
@@ -26,14 +27,17 @@ class Process(IO):
         if self.args.hook:
             self.register_hook()
 
-
     def init_env(self, rank):
         super().init_env(rank)
         self.result = dict()
         self.iter_info = dict()
         self.epoch_info = dict()
         self.meta_info = dict(epoch=0, iter=0)   
-    
+
+    def init_tb(self):
+        if self.rank == 0:
+            self.writer = SummaryWriter(log_dir=self.log_path)
+
     def save_args(self):
         arg_dict = vars(self.args)
         with open('{}/config.yaml'.format(self.log_path), 'w') as f:
@@ -42,7 +46,7 @@ class Process(IO):
     def cp_model(self):
         if os.path.exists(os.path.join(self.log_path, 'model')):
             shutil.rmtree(os.path.join(self.log_path, 'model'))
-        shutil.copytree('model', os.path.join(self.log_path, 'model'))
+        shutil.copytree('model', os.path.join(self.log_path, 'model'), ignore=shutil.ignore_patterns('pyc'))
 
     def load_data(self):
         Feeder = import_class(self.args.feeder)
@@ -192,7 +196,6 @@ class Process(IO):
     def start(self):  #此处执行的程序
         self.logger.log('Parameters:\n{}\n'.format(str(vars(self.args))))
         self.best_score = 0
-        self.writer = SummaryWriter(self.log_path)
 
         # training phase
         if self.args.phase == 'train':
@@ -220,16 +223,16 @@ class Process(IO):
             # the path of weights must be appointed
             if self.args.weights is None:
                 raise ValueError('Please appoint --weights.')
-            self.logger.log('Model:   {}.'.format(self.args.model))
-            self.logger.log('Weights: {}.'.format(self.args.weights))
+            self.log_print('Model:   {}.'.format(self.args.model))
+            self.log_print('Weights: {}.'.format(self.args.weights))
             # evaluation
-            self.logger.eval_log('Evaluation Start:')
+            # self.logger.eval_log('Evaluation Start:')
             result, acc = self.test()
-            self.logger.eval_log('Done.\n')
+            # self.logger.eval_log('Done.\n')
             # save the output of model
-            result_dict = dict(
-                    zip(self.data_loader['test'].dataset.sample_name, result))
-            self.save_results(result_dict, 'result_{}_{}.pkl'.format(epoch, acc))
+            # result_dict = dict(
+            #         zip(self.data_loader['test'].dataset.sample_name, result))
+            # self.save_results(result_dict, 'result_{}_{}.pkl'.format(epoch, acc))
             # save best results
             # if acc > self.best_score:
             #     self.save_results(result_dict, 'result_best_{}.pkl'.format(acc))
